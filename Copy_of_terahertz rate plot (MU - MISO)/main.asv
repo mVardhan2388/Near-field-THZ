@@ -1,0 +1,219 @@
+clc;
+clear;
+close all;
+
+
+para = para_init();
+
+Mt = para.M_t;
+Mr = para.M_r;
+K  = para.K;
+Qk = para.Qk;
+
+user_labels = arrayfun(@(i) ...
+    sprintf('User %d (r=%dm, \\theta=%d°)', ...
+    i, round(para.r(i)), round(rad2deg(para.theta_users(i))) ), ...
+    1:K, 'UniformOutput', false);
+
+colors = lines(K);
+
+
+% A : (Mr*K) x Mt
+
+
+
+SNR_dB = -20:5:30;
+SNR    = 10.^(SNR_dB/10);
+
+R_BD   = zeros(size(SNR));
+R_SLNR = zeros(size(SNR));
+
+noise0 = para.noise;
+
+for i = 1:length(SNR)
+
+    para.noise = 1 / SNR(i);
+
+    A = gen_channel_thz_mimo(para);
+    W_BD   = beam_BD(para, A);          % Mt x (Qk*K)
+    W_SLNR = beam_SLNR_reg(para, A);    % Mt x (Qk*K)
+
+    for k = 1:K
+        % --- User-k channel ---
+        Ak = A((k-1)*Mr+1 : k*Mr, :);   % Mr x Mt
+
+        
+        Wk_BD   = W_BD(:,   (k-1)*Qk+1 : k*Qk);
+        Wk_SLNR = W_SLNR(:, (k-1)*Qk+1 : k*Qk);
+
+        
+        % R_BD(i)   = R_BD(i)   + rate_cal(para, Ak, Wk_BD);
+        % R_SLNR(i) = R_SLNR(i) + rate_cal(para, Ak, Wk_SLNR);
+        R_BD(i)   =  rate_cal(para, Ak, Wk_BD);
+        R_SLNR(i) =  rate_cal(para, Ak, Wk_SLNR);
+
+        EE_BD(i) = R_BD(i) / para.Pt;
+        EE_SLNR(i) = R_SLNR(i) / para.Pt;
+
+        Pr_BD(i)   = rx_power_cal(Ak, W_BD);
+        Pr_SLNR(i) = rx_power_cal(Ak, W_SLNR);
+    end
+end
+
+para.noise = noise0;
+
+figure;
+plot(SNR_dB, real(R_BD),   '-o', 'LineWidth',1);
+hold on;
+plot(SNR_dB, real(R_SLNR), '-s', 'LineWidth',1);
+grid on;
+xlabel('SNR (dB)');
+ylabel('Sum Rate (bps/Hz)');
+legend('BD','Reg-SLNR','Location','northwest');
+title('THz MU-MIMO: Sum Rate vs SNR');
+
+figure;
+plot(SNR_dB, real(EE_BD),   '-o', 'LineWidth',1);
+hold on;
+plot(SNR_dB, real(EE_SLNR), '-s', 'LineWidth',1);
+grid on;
+xlabel('SNR (dB)');
+ylabel('Sum Rate (bps/Hz)');
+legend('BD','Reg-SLNR','Location','northwest');
+title('THz MU-MIMO: Energy efficiency vs SNR');
+
+
+
+% Recived Rate vs SNR
+for i = 1:length(SNR_dB)
+    
+    para.Pt = SNR(i);
+    A = gen_channel_thz_mimo(para);
+    W_BD   = beam_BD(para, A);          % Mt x (Qk*K)
+    W_SLNR = beam_SLNR_reg(para, A);    % Mt x (Qk*K)
+
+    for k = 1:K
+        % --- User-k channel ---
+        Ak = A((k-1)*Mr+1 : k*Mr, :);   % Mr x Mt
+        
+        Wk_BD   = W_BD(:,   (k-1)*Qk+1 : k*Qk);
+        Wk_SLNR = W_SLNR(:, (k-1)*Qk+1 : k*Qk);
+
+        Pr_BD_e(i)   = rx_power_cal(Ak, W_BD);
+        Pr_SLNR_e(i) = rx_power_cal(Ak, W_SLNR);
+    end
+end
+
+figure;
+plot(SNR_dB, real(Pr_BD_e),   '-o', 'LineWidth',1);
+hold on;
+plot(SNR_dB, real(Pr_SLNR_e), '-s', 'LineWidth',1);
+grid on;
+xlabel('SNR (dB)');
+ylabel('Sum Rate (bps/Hz)');
+legend('BD','Reg-SLNR','Location','northwest');
+title('THz MU-MIMO: Energy efficiency vs SNR');
+
+
+% Rate vs Rx Array Size 
+Mr_list = 0:16:128;
+
+R_BD_M   = zeros(size(Mr_list));
+R_SLNR_M = zeros(size(Mr_list));
+
+for m = 1:length(Mr_list)
+
+    para.M_r = Mr_list(m);
+    para.Qk  = Mr_list(m);
+
+    para.y_bs_r = ((0:para.M_r-1) - (para.M_r-1)/2) * para.d;
+
+    A = gen_channel_thz_mimo(para);
+
+    W_BD   = beam_BD(para, A);
+    W_SLNR = beam_SLNR_reg(para, A);
+
+    for k = 1:K
+        Ak = A((k-1)*para.M_r+1 : k*para.M_r, :);
+
+        Wk_BD   = W_BD(:,   (k-1)*para.Qk+1 : k*para.Qk);
+        Wk_SLNR = W_SLNR(:, (k-1)*para.Qk+1 : k*para.Qk);
+
+        R_BD_M(m)   = R_BD_M(m)   + rate_cal(para, Ak, Wk_BD);
+        R_SLNR_M(m) = R_SLNR_M(m) + rate_cal(para, Ak, Wk_SLNR);
+
+        EE_BD_M(m) = R_BD_M(m) / para.Pt;
+        EE_SLNR_M(m) = R_SLNR_M(m) / para.Pt;
+    end
+end
+
+figure;
+plot(Mr_list, real(R_BD_M),   '-o', 'LineWidth',1); 
+hold on;
+plot(Mr_list, real(R_SLNR_M), '-s', 'LineWidth',1);
+grid on;
+xlabel('Number of Rx Antennas (M_r)');
+ylabel('Sum Rate (bps/Hz)');
+legend('BD','Reg-SLNR','Location','northwest');
+title('THz MU-MIMO: Sum Rate vs Rx Array Size');
+
+figure;
+plot(Mr_list, real(EE_BD_M),   '-o', 'LineWidth',1); 
+hold on;
+plot(Mr_list, real(EE_SLNR_M), '-s', 'LineWidth',1);
+grid on;
+xlabel('Number of Rx Antennas (M_r)');
+ylabel('Sum Rate (bps/Hz)');
+legend('BD','Reg-SLNR','Location','northwest');
+title('THz MU-MIMO: Energy efficiency vs Rx Array Size');
+
+
+% rate vs distance
+
+dist_vec = 5:5:40;
+
+R_BD_r   = zeros(size(dist_vec));
+R_SLNR_r = zeros(size(dist_vec));
+Pr_BD_r  = zeros(size(dist_vec));
+Pr_SLNR_r = zeros(size(dist_vec));
+
+para.K = 1;
+para.Qk = para.M_r;
+
+for i = 1:length(dist_vec)
+
+    para.r = dist_vec(i);
+    A = gen_channel_thz_mimo(para);
+
+       % single user
+    W_BD   = beam_BD(para, A);
+    W_SLNR = beam_SLNR_reg(para, A);
+
+    R_BD_r(i)   = rate_cal(para, A, W_BD);
+    R_SLNR_r(i) = rate_cal(para, A, W_SLNR);
+
+    Pr_BD_r(i)   = rx_power_cal(A, W_BD);
+    Pr_SLNR_r(i) = rx_power_cal(A, W_SLNR);
+end
+
+
+figure;
+plot(dist_vec, real(R_BD_r),   '-o', 'LineWidth',1); 
+hold on;
+plot(dist_vec, real(R_SLNR_r), '-s', 'LineWidth',1);
+grid on;
+xlabel('Number of Rx Antennas (M_r)');
+ylabel('Sum Rate (bps/Hz)');
+legend('BD','Reg-SLNR','Location','northwest');
+title('THz MU-MIMO: Sum Rate vs user distance');
+
+figure;
+plot(dist_vec, real(Pr_BD_r),   '-o', 'LineWidth',1); 
+hold on;
+plot(dist_vec, real(Pr_SLNR_r), '-s', 'LineWidth',1);
+grid on;
+xlabel('Number of Rx Antennas (M_r)');
+ylabel('Sum Rate (bps/Hz)');
+legend('BD','Reg-SLNR','Location','northwest');
+title('THz MU-MIMO: Power recived vs user distance');
+
